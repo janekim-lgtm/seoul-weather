@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>서울 날씨 · 옷차림 추천</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    * { font-family: 'Noto Sans KR', system-ui, sans-serif; }
+
+    .glass {
+      background: rgba(255, 255, 255, 0.11);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255,255,255,0.15);
+    }
+
+    .glass-sm {
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    @keyframes float {
+      0%,100% { transform: translateY(0) rotate(0deg); }
+      33%      { transform: translateY(-14px) rotate(3deg); }
+      66%      { transform: translateY(-7px) rotate(-2deg); }
+    }
+    @keyframes blob {
+      0%,100% { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+      50%      { border-radius: 30% 60% 70% 40% / 50% 60% 30% 60%; }
+    }
+    @keyframes spin-slow { to { transform: rotate(360deg); } }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .float-anim   { animation: float 5s ease-in-out infinite; }
+    .blob-anim    { animation: blob 9s ease-in-out infinite; }
+    .spin-slow    { animation: spin-slow 2s linear infinite; }
+    .fade-up      { animation: fadeUp 0.5s ease both; }
+    .fade-up-d1   { animation: fadeUp 0.5s 0.1s ease both; }
+    .fade-up-d2   { animation: fadeUp 0.5s 0.2s ease both; }
+    .fade-up-d3   { animation: fadeUp 0.5s 0.3s ease both; }
+
+    .outfit-item {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px;
+      padding: 13px 14px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      transition: background 0.2s;
+    }
+    .outfit-item:hover { background: rgba(255,255,255,0.15); }
+
+    .stat-box {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      padding: 13px 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .forecast-box {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 16px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+    }
+
+    ::-webkit-scrollbar { width: 0; }
+  </style>
+</head>
+<body style="min-height:100vh; overflow-x:hidden;">
+  <div id="root"></div>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    /* ─── WMO Weather Codes ──────────────────────────────── */
+    const WMO_MAP = {
+      0:  { ko: '맑음',             day: '☀️',  night: '🌙', rain: false, snow: false },
+      1:  { ko: '대체로 맑음',      day: '🌤️',  night: '🌙', rain: false, snow: false },
+      2:  { ko: '구름 조금',        day: '⛅',  night: '☁️', rain: false, snow: false },
+      3:  { ko: '흐림',             day: '☁️',  night: '☁️', rain: false, snow: false },
+      45: { ko: '안개',             day: '🌫️', night: '🌫️', rain: false, snow: false },
+      48: { ko: '짙은 안개',        day: '🌫️', night: '🌫️', rain: false, snow: false },
+      51: { ko: '가벼운 이슬비',    day: '🌦️', night: '🌧️', rain: true,  snow: false },
+      53: { ko: '이슬비',           day: '🌦️', night: '🌧️', rain: true,  snow: false },
+      55: { ko: '강한 이슬비',      day: '🌧️', night: '🌧️', rain: true,  snow: false },
+      61: { ko: '가벼운 비',        day: '🌧️', night: '🌧️', rain: true,  snow: false },
+      63: { ko: '비',               day: '🌧️', night: '🌧️', rain: true,  snow: false },
+      65: { ko: '폭우',             day: '🌧️', night: '🌧️', rain: true,  snow: false },
+      71: { ko: '가벼운 눈',        day: '🌨️', night: '🌨️', rain: false, snow: true  },
+      73: { ko: '눈',               day: '🌨️', night: '🌨️', rain: false, snow: true  },
+      75: { ko: '폭설',             day: '❄️',  night: '❄️',  rain: false, snow: true  },
+      77: { ko: '싸락눈',           day: '🌨️', night: '🌨️', rain: false, snow: true  },
+      80: { ko: '가벼운 소나기',    day: '🌦️', night: '🌧️', rain: true,  snow: false },
+      81: { ko: '소나기',           day: '🌧️', night: '🌧️', rain: true,  snow: false },
+      82: { ko: '강한 소나기',      day: '⛈️', night: '⛈️', rain: true,  snow: false },
+      85: { ko: '눈 소나기',        day: '🌨️', night: '🌨️', rain: false, snow: true  },
+      86: { ko: '폭설 소나기',      day: '❄️',  night: '❄️',  rain: false, snow: true  },
+      95: { ko: '뇌우',             day: '⛈️', night: '⛈️', rain: true,  snow: false },
+      96: { ko: '우박 뇌우',        day: '⛈️', night: '⛈️', rain: true,  snow: false },
+      99: { ko: '강한 우박 뇌우',   day: '⛈️', night: '⛈️', rain: true,  snow: false },
+    };
+
+    function getWMO(code, isDay = 1) {
+      const w = WMO_MAP[code] ?? { ko: '알 수 없음', day: '🌡️', night: '🌡️', rain: false, snow: false };
+      return { ...w, emoji: isDay ? w.day : w.night };
+    }
+
+    /* ─── Background Gradient ────────────────────────────── */
+    function getBg(code, isDay) {
+      const w = getWMO(code, isDay);
+      if (w.snow)                    return ['#0c2461','#1e3799','#4a69bd'];
+      if (code >= 95)                return ['#0a0a0a','#1a1a2e','#16213e'];
+      if (w.rain)                    return ['#0f0c29','#1a1a4e','#302b63'];
+      if (code === 45 || code === 48)return ['#2c3e50','#3d5166','#4a6572'];
+      if (code === 3)                return ['#2c3e50','#485460','#64748b'];
+      if (!isDay)                    return ['#0a0a2e','#0d1b4b','#1a237e'];
+      if (code === 0)                return ['#0c4a8a','#1565c0','#1e88e5'];
+      if (code === 1 || code === 2)  return ['#0277bd','#0288d1','#29b6f6'];
+      return ['#0369a1','#0ea5e9','#38bdf8'];
+    }
+
+    /* ─── Temperature Color ─────────────────────────────── */
+    function getTempColor(t) {
+      if (t <= 0)  return '#93c5fd';
+      if (t <= 10) return '#67e8f9';
+      if (t <= 20) return '#86efac';
+      if (t <= 27) return '#fde68a';
+      if (t <= 33) return '#fb923c';
+      return '#f87171';
+    }
+
+    /* ─── Wind Direction ─────────────────────────────────── */
+    function windDir(deg) {
+      return ['북','북동','동','남동','남','남서','서','북서'][Math.round(deg / 45) % 8];
+    }
+
+    /* ─── Outfit Logic ───────────────────────────────────── */
+    function getOutfit(feelsLike, code, windSpeed) {
+      const { rain, snow } = getWMO(code);
+      const storm  = code >= 95;
+      const windy  = windSpeed >= 8;
+
+      let badge, badgeColor, items = [], tips = [];
+
+      if (feelsLike <= 4) {
+        badge = '한파 주의 🥶'; badgeColor = '#93c5fd';
+        items = [
+          { cat: '아우터',  icon: '🧥', name: '롱 패딩 / 두꺼운 코트' },
+          { cat: '이너',    icon: '🩱', name: '히트텍 + 기모 맨투맨' },
+          { cat: '하의',    icon: '👖', name: '기모 바지 / 두꺼운 레깅스' },
+          { cat: '신발',    icon: '🥾', name: '방한화 / 발목 부츠' },
+          { cat: '소품',    icon: '🧣', name: '목도리 + 장갑 + 귀마개' },
+        ];
+        tips = ['레이어링으로 체온을 유지하세요', '노출 부위를 최소화하세요'];
+      } else if (feelsLike <= 9) {
+        badge = '매우 추움 🧤'; badgeColor = '#a5f3fc';
+        items = [
+          { cat: '아우터',  icon: '🧥', name: '패딩 점퍼 / 울 코트' },
+          { cat: '이너',    icon: '🧶', name: '두꺼운 니트 / 스웨터' },
+          { cat: '하의',    icon: '👖', name: '청바지 / 두꺼운 슬랙스' },
+          { cat: '신발',    icon: '👟', name: '스니커즈 / 앵클부츠' },
+          { cat: '소품',    icon: '🧣', name: '목도리 권장' },
+        ];
+        tips = ['얇은 옷 여러 겹이 두꺼운 옷 하나보다 따뜻해요', '실내외 온도 차가 크니 아우터 필수'];
+      } else if (feelsLike <= 16) {
+        badge = '쌀쌀함 🍂'; badgeColor = '#6ee7b7';
+        items = [
+          { cat: '아우터',  icon: '🧶', name: '가디건 / 가벼운 자켓' },
+          { cat: '상의',    icon: '👕', name: '긴팔 티셔츠 / 셔츠' },
+          { cat: '하의',    icon: '👖', name: '청바지 / 면 슬랙스' },
+          { cat: '신발',    icon: '👟', name: '스니커즈 / 로퍼' },
+        ];
+        tips = ['일교차가 크니 겉옷을 꼭 챙기세요', '저녁엔 더 쌀쌀해질 수 있어요'];
+      } else if (feelsLike <= 22) {
+        badge = '선선함 🌿'; badgeColor = '#86efac';
+        items = [
+          { cat: '상의',    icon: '👕', name: '반팔 또는 긴팔 티셔츠' },
+          { cat: '아우터',  icon: '🧢', name: '얇은 자켓 / 바람막이' },
+          { cat: '하의',    icon: '👖', name: '면바지 / 청바지' },
+          { cat: '신발',    icon: '👟', name: '스니커즈' },
+        ];
+        tips = ['야외활동 하기 최적의 날씨예요! 🎉'];
+      } else if (feelsLike <= 27) {
+        badge = '따뜻함 🌸'; badgeColor = '#fde68a';
+        items = [
+          { cat: '상의',    icon: '👕', name: '반팔 티셔츠 / 린넨 셔츠' },
+          { cat: '하의',    icon: '🩳', name: '반바지 / 얇은 면바지' },
+          { cat: '신발',    icon: '👡', name: '샌들 / 스니커즈' },
+          { cat: '소품',    icon: '🕶️', name: '선글라스 + 모자' },
+        ];
+        tips = ['자외선 차단제를 바르세요 ☀️', '가벼운 겉옷을 챙기면 저녁에 유용해요'];
+      } else {
+        badge = '매우 더움 🔥'; badgeColor = '#fca5a5';
+        items = [
+          { cat: '상의',    icon: '👕', name: '민소매 / 얇은 반팔' },
+          { cat: '하의',    icon: '🩳', name: '반바지 / 얇은 원피스' },
+          { cat: '신발',    icon: '👡', name: '샌들 / 슬리퍼' },
+          { cat: '관리',    icon: '🧴', name: 'SPF50+ 선크림 필수' },
+        ];
+        tips = ['탈수 방지를 위해 물을 자주 마시세요', '밝은 색상·흡습속건 소재를 선택하세요'];
+      }
+
+      if (rain || storm) {
+        items.push({ cat: '필수품', icon: '☂️', name: '우산 또는 우비' });
+        tips.push('젖은 노면 미끄럼 주의');
+      }
+      if (snow) {
+        const si = items.findIndex(i => i.cat === '신발');
+        if (si >= 0) items[si] = { cat: '신발', icon: '🥾', name: '방수 부츠 (눈길 대비)' };
+        tips.push('눈길 낙상 주의! 천천히 걸으세요');
+      }
+      if (windy) tips.push('강풍 주의 – 모자를 단단히 고정하세요');
+
+      return { badge, badgeColor, items, tips };
+    }
+
+    /* ─── Date Helpers ───────────────────────────────────── */
+    function dayLabel(str, i) {
+      if (i === 0) return '오늘';
+      if (i === 1) return '내일';
+      const days = ['일','월','화','수','목','금','토'];
+      return days[new Date(str).getDay()] + '요일';
+    }
+
+    function nowKST() {
+      return new Date().toLocaleTimeString('ko-KR', {
+        hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Seoul',
+      });
+    }
+
+    function dateKST() {
+      return new Date().toLocaleDateString('ko-KR', {
+        year: 'numeric', month: 'long', day: 'numeric', weekday: 'long', timeZone: 'Asia/Seoul',
+      });
+    }
+
+    /* ─── App ────────────────────────────────────────────── */
+    function App() {
+      const [data,    setData]    = useState(null);
+      const [error,   setError]   = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [time,    setTime]    = useState(nowKST());
+
+      const fetchWeather = useCallback(async () => {
+        setLoading(true); setError(null);
+        try {
+          const url =
+            'https://api.open-meteo.com/v1/forecast' +
+            '?latitude=37.5665&longitude=126.9780' +
+            '&current=temperature_2m,relative_humidity_2m,apparent_temperature' +
+            ',is_day,precipitation,weather_code,wind_speed_10m,wind_direction_10m' +
+            '&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_sum' +
+            '&timezone=Asia%2FSeoul&forecast_days=3';
+          const res = await fetch(url);
+          if (!res.ok) throw new Error('날씨 데이터를 불러오지 못했습니다.');
+          setData(await res.json());
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      useEffect(() => {
+        fetchWeather();
+        const t = setInterval(() => setTime(nowKST()), 30000);
+        return () => clearInterval(t);
+      }, [fetchWeather]);
+
+      const c   = data?.current;
+      const wmo = c ? getWMO(c.weather_code, c.is_day) : null;
+      const [c1, c2, c3] = c ? getBg(c.weather_code, c.is_day) : ['#0c4a8a','#1565c0','#1e88e5'];
+
+      return (
+        <div style={{
+          minHeight: '100vh',
+          background: `linear-gradient(155deg, ${c1} 0%, ${c2} 50%, ${c3} 100%)`,
+          transition: 'background 1.5s ease',
+        }}>
+          {/* Decorative blobs */}
+          <div className="blob-anim" style={{
+            position:'fixed', top:'-10%', right:'-8%',
+            width:'380px', height:'380px',
+            background:'rgba(255,255,255,0.05)',
+            pointerEvents:'none', zIndex:0,
+          }}/>
+          <div className="blob-anim" style={{
+            position:'fixed', bottom:'-15%', left:'-8%',
+            width:'480px', height:'480px',
+            background:'rgba(255,255,255,0.04)',
+            animationDirection:'reverse', animationDuration:'11s',
+            pointerEvents:'none', zIndex:0,
+          }}/>
+          <div className="blob-anim" style={{
+            position:'fixed', top:'40%', left:'20%',
+            width:'200px', height:'200px',
+            background:'rgba(255,255,255,0.03)',
+            animationDuration:'13s',
+            pointerEvents:'none', zIndex:0,
+          }}/>
+
+          {/* Content */}
+          <div style={{
+            position:'relative', zIndex:1,
+            maxWidth:'480px', margin:'0 auto',
+            padding:'28px 16px 56px',
+          }}>
+            {loading && <LoadingScreen />}
+            {error && <ErrorScreen msg={error} onRetry={fetchWeather} />}
+            {data && !loading && (
+              <>
+                <WeatherCard
+                  c={c} wmo={wmo} time={time}
+                  daily={data.daily} onRefresh={fetchWeather}
+                />
+                <OutfitCard
+                  feelsLike={c.apparent_temperature}
+                  code={c.weather_code}
+                  wind={c.wind_speed_10m}
+                />
+                <ForecastCard daily={data.daily} />
+                <footer style={{
+                  textAlign:'center', marginTop:'20px',
+                  color:'rgba(255,255,255,0.3)', fontSize:'0.72rem',
+                }}>
+                  데이터: Open-Meteo · 자동 갱신 30분
+                </footer>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    /* ─── Loading Screen ─────────────────────────────────── */
+    function LoadingScreen() {
+      return (
+        <div style={{ textAlign:'center', paddingTop:'100px', color:'rgba(255,255,255,0.7)' }}>
+          <div style={{ fontSize:'4.5rem', display:'inline-block' }} className="float-anim">🌤️</div>
+          <p style={{ marginTop:'18px', fontSize:'1rem', fontWeight:'500' }}>서울 날씨를 불러오는 중…</p>
+          <div style={{
+            width:'40px', height:'3px', background:'rgba(255,255,255,0.3)',
+            borderRadius:'2px', margin:'16px auto 0',
+            overflow:'hidden', position:'relative',
+          }}>
+            <div style={{
+              position:'absolute', inset:0,
+              background:'rgba(255,255,255,0.8)',
+              borderRadius:'2px',
+              animation:'spin-slow 1.2s linear infinite',
+              transformOrigin:'left center',
+            }}/>
+          </div>
+        </div>
+      );
+    }
+
+    /* ─── Error Screen ───────────────────────────────────── */
+    function ErrorScreen({ msg, onRetry }) {
+      return (
+        <div style={{ textAlign:'center', paddingTop:'100px', color:'rgba(255,255,255,0.85)' }}>
+          <div style={{ fontSize:'3.5rem', marginBottom:'16px' }}>⚠️</div>
+          <p style={{ marginBottom:'24px', fontSize:'0.95rem', lineHeight:'1.6' }}>{msg}</p>
+          <button onClick={onRetry} style={{
+            background:'rgba(255,255,255,0.18)', border:'1px solid rgba(255,255,255,0.3)',
+            borderRadius:'14px', color:'#fff', cursor:'pointer',
+            padding:'11px 28px', fontSize:'0.9rem', fontWeight:'600',
+            transition:'background 0.2s',
+          }}>
+            🔄 다시 시도
+          </button>
+        </div>
+      );
+    }
+
+    /* ─── Weather Card ───────────────────────────────────── */
+    function WeatherCard({ c, wmo, time, daily, onRefresh }) {
+      const temp   = Math.round(c.temperature_2m);
+      const feels  = Math.round(c.apparent_temperature);
+      const tColor = getTempColor(temp);
+
+      return (
+        <div className="glass fade-up" style={{ borderRadius:'28px', padding:'28px 24px', marginBottom:'14px' }}>
+          {/* Top row */}
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'22px' }}>
+            <div>
+              <div style={{ display:'flex', alignItems:'center', gap:'5px', marginBottom:'3px' }}>
+                <span style={{ fontSize:'0.95rem' }}>📍</span>
+                <span style={{ color:'#fff', fontWeight:'800', fontSize:'1.15rem', letterSpacing:'-0.3px' }}>서울특별시</span>
+              </div>
+              <div style={{ color:'rgba(255,255,255,0.45)', fontSize:'0.75rem', marginBottom:'1px' }}>{dateKST()}</div>
+              <div style={{ color:'rgba(255,255,255,0.35)', fontSize:'0.73rem' }}>{time} 기준</div>
+            </div>
+            <button onClick={onRefresh} style={{
+              background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.14)',
+              borderRadius:'12px', color:'rgba(255,255,255,0.65)', cursor:'pointer',
+              padding:'9px 11px', fontSize:'1rem', transition:'all 0.2s',
+            }}>🔄</button>
+          </div>
+
+          {/* Main display */}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'26px' }}>
+            <div>
+              <div style={{
+                fontSize:'6rem', fontWeight:'900', color: tColor,
+                lineHeight:'1', letterSpacing:'-3px',
+                textShadow: `0 0 40px ${tColor}55, 0 4px 20px rgba(0,0,0,0.3)`,
+              }}>
+                {temp}°
+              </div>
+              <div style={{ color:'rgba(255,255,255,0.85)', fontSize:'1.05rem', fontWeight:'700', marginTop:'6px' }}>
+                {wmo.ko}
+              </div>
+              <div style={{ color:'rgba(255,255,255,0.4)', fontSize:'0.78rem', marginTop:'4px', display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                <span>체감 {feels}°</span>
+                <span style={{ color:'rgba(255,255,255,0.2)' }}>·</span>
+                <span style={{ color:'#fca5a5' }}>최고 {Math.round(daily.temperature_2m_max[0])}°</span>
+                <span style={{ color:'rgba(255,255,255,0.2)' }}>/</span>
+                <span style={{ color:'#93c5fd' }}>최저 {Math.round(daily.temperature_2m_min[0])}°</span>
+              </div>
+            </div>
+            <div className="float-anim" style={{ fontSize:'6.5rem', lineHeight:'1', userSelect:'none', flexShrink:0 }}>
+              {wmo.emoji}
+            </div>
+          </div>
+
+          {/* Stat grid */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'8px' }}>
+            {[
+              { icon:'💧', label:'습도',  val:`${c.relative_humidity_2m}%` },
+              { icon:'🌬️', label:'풍속',  val:`${c.wind_speed_10m}㎧` },
+              { icon:'🧭', label:'풍향',  val: windDir(c.wind_direction_10m) },
+              { icon:'🌧️', label:'강수량', val:`${c.precipitation}㎜` },
+            ].map(({ icon, label, val }) => (
+              <div key={label} className="stat-box">
+                <span style={{ fontSize:'1.2rem' }}>{icon}</span>
+                <span style={{ color:'rgba(255,255,255,0.4)', fontSize:'0.63rem', fontWeight:'600' }}>{label}</span>
+                <span style={{ color:'#fff', fontSize:'0.82rem', fontWeight:'700' }}>{val}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    /* ─── Outfit Card ────────────────────────────────────── */
+    function OutfitCard({ feelsLike, code, wind }) {
+      const { badge, badgeColor, items, tips } = getOutfit(feelsLike, code, wind);
+
+      return (
+        <div className="glass fade-up-d1" style={{ borderRadius:'28px', padding:'24px', marginBottom:'14px' }}>
+          {/* Header */}
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'18px' }}>
+            <div style={{
+              width:'42px', height:'42px', borderRadius:'12px',
+              background:'rgba(255,255,255,0.1)', display:'flex', alignItems:'center',
+              justifyContent:'center', fontSize:'1.3rem', flexShrink:0,
+            }}>
+              👗
+            </div>
+            <div>
+              <div style={{ color:'#fff', fontWeight:'800', fontSize:'1rem', letterSpacing:'-0.2px' }}>
+                오늘의 추천 옷차림
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:'6px', marginTop:'2px' }}>
+                <span style={{
+                  color: badgeColor, fontSize:'0.75rem', fontWeight:'700',
+                  background: `${badgeColor}18`, padding:'2px 9px', borderRadius:'20px',
+                  border:`1px solid ${badgeColor}30`,
+                }}>
+                  {badge}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Items grid */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'16px' }}>
+            {items.map((item, i) => (
+              <div key={i} className="outfit-item">
+                <span style={{ fontSize:'1.7rem', flexShrink:0 }}>{item.icon}</span>
+                <div>
+                  <div style={{
+                    color:'rgba(255,255,255,0.38)', fontSize:'0.62rem', fontWeight:'700',
+                    textTransform:'uppercase', letterSpacing:'0.6px', marginBottom:'2px',
+                  }}>{item.cat}</div>
+                  <div style={{ color:'#fff', fontSize:'0.8rem', fontWeight:'600', lineHeight:'1.35' }}>{item.name}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Tips */}
+          {tips.length > 0 && (
+            <div style={{
+              background:'rgba(255,255,255,0.06)',
+              border:'1px solid rgba(255,255,255,0.1)',
+              borderRadius:'16px', padding:'14px 16px',
+            }}>
+              <div style={{
+                color:'rgba(255,255,255,0.45)', fontSize:'0.67rem', fontWeight:'700',
+                textTransform:'uppercase', letterSpacing:'0.7px', marginBottom:'10px',
+                display:'flex', alignItems:'center', gap:'5px',
+              }}>
+                💡 패션 팁
+              </div>
+              {tips.map((tip, i) => (
+                <div key={i} style={{
+                  display:'flex', alignItems:'flex-start', gap:'8px',
+                  color:'rgba(255,255,255,0.72)', fontSize:'0.82rem', lineHeight:'1.5',
+                  marginBottom: i < tips.length - 1 ? '6px' : 0,
+                }}>
+                  <span style={{ color:'rgba(255,255,255,0.35)', fontSize:'0.9rem', marginTop:'1px', flexShrink:0 }}>›</span>
+                  {tip}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ─── Forecast Card ──────────────────────────────────── */
+    function ForecastCard({ daily }) {
+      return (
+        <div className="glass fade-up-d2" style={{ borderRadius:'28px', padding:'22px' }}>
+          <div style={{
+            color:'rgba(255,255,255,0.45)', fontSize:'0.67rem', fontWeight:'700',
+            textTransform:'uppercase', letterSpacing:'0.7px', marginBottom:'14px',
+            display:'flex', alignItems:'center', gap:'5px',
+          }}>
+            📅 3일 예보
+          </div>
+          <div style={{ display:'flex', gap:'8px' }}>
+            {daily.time.map((dateStr, i) => {
+              const w    = getWMO(daily.weather_code[i], 1);
+              const precip = (daily.precipitation_sum?.[i] ?? 0);
+              return (
+                <div key={dateStr} className="forecast-box">
+                  <div style={{ color:'rgba(255,255,255,0.55)', fontSize:'0.73rem', fontWeight:'700' }}>
+                    {dayLabel(dateStr, i)}
+                  </div>
+                  <div style={{ fontSize:'2rem', lineHeight:'1' }}>{w.emoji}</div>
+                  <div style={{
+                    color:'rgba(255,255,255,0.4)', fontSize:'0.66rem', textAlign:'center',
+                    lineHeight:'1.3',
+                  }}>{w.ko}</div>
+                  <div style={{ display:'flex', gap:'5px', fontSize:'0.82rem', fontWeight:'800' }}>
+                    <span style={{ color:'#fca5a5' }}>{Math.round(daily.temperature_2m_max[i])}°</span>
+                    <span style={{ color:'rgba(255,255,255,0.2)' }}>/</span>
+                    <span style={{ color:'#93c5fd' }}>{Math.round(daily.temperature_2m_min[i])}°</span>
+                  </div>
+                  {precip > 0 && (
+                    <div style={{ color:'#7dd3fc', fontSize:'0.66rem', fontWeight:'600' }}>
+                      💧 {precip.toFixed(1)}㎜
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    /* ─── Mount ──────────────────────────────────────────── */
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
